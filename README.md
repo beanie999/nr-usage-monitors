@@ -6,8 +6,8 @@ Metric API.
 
 | Script | Metric | Dimensions |
 | --- | --- | --- |
-| `alert-details-monitor.js` | `usage.alerts` | `alertAccountId`, `alertAccountName`, `conditionType`, `enabled`, `baselineDirection`, `usesAnomalies`, `usesPredictions` |
-| `dashboard-details-monitor.js` | `usage.dashboards` | `dashboardAccountId`, `dashboardAccountName`, `permissions` |
+| `alert-details-monitor.js` | `usage.alerts` | `enabled`, `usesAnomalies`, `usesPredictions` |
+| `dashboard-details-monitor.js` | `usage.dashboards` | none |
 | `notebook-details-monitor.js` | `usage.notebooks` | none |
 | `scorecard-details-monitor.js` | `usage.scorecards` | none |
 | `team-details-monitor.js` | `usage.teams` | none |
@@ -28,5 +28,16 @@ EU endpoints listed in the TODO comment at the top of each script.
 ## Checking the data
 
 ```
-FROM Metric SELECT latest(usage.dashboards) FACET dashboardAccountName, permissions SINCE 1 hour ago
+FROM Metric SELECT latest(usage.dashboards) SINCE 1 hour ago
+```
+
+Enabled alert conditions over the last day, split by alerting style (anomaly,
+predictive, or neither):
+
+```
+FROM Metric
+SELECT filter(latest(usage.alerts), WHERE usesAnomalies),
+  filter(latest(usage.alerts), WHERE usesPredictions),
+  filter(latest(usage.alerts), WHERE NOT usesAnomalies AND NOT usesPredictions) as others
+WHERE enabled TIMESERIES since 1 day ago
 ```

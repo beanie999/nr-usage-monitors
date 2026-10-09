@@ -4,10 +4,8 @@
 //
 // Purpose:
 //   Query NerdGraph for every dashboard entity visible to the API key,
-//   then count them and write the totals to NRDB as a custom metric
-//   named "usage.dashboards" via the Metric API. Counts are grouped by
-//   dashboardAccountId, dashboardAccountName and permissions, with one
-//   metric data point per combination.
+//   then write the total count to NRDB as a custom metric named
+//   "usage.dashboards" via the Metric API. The metric has no dimensions.
 //
 // Required secure credentials (Synthetics > Secure credentials):
 //   NEW_RELIC_API_KEY     - a NerdGraph-capable User API key (read access to entities)
@@ -43,19 +41,6 @@ const DASHBOARD_SEARCH_QUERY = `
           entities {
             ... on DashboardEntityOutline {
               guid
-              name
-              permissions
-              owner {
-                email
-                userId
-              }
-              createdAt
-              updatedAt
-              dashboardParentGuid
-              account {
-                id
-                name
-              }
             }
           }
           nextCursor
@@ -134,49 +119,12 @@ async function fetchAllDashboards() {
   return dashboards;
 }
 
-function countDashboards(dashboards) {
-  const groups = new Map();
-
-  for (const dashboard of dashboards) {
-    // "accountId" is a reserved attribute name in NRDB, so the dashboard's own
-    // account is stored under dashboardAccountId / dashboardAccountName.
-    const attributes = {
-      dashboardAccountId: dashboard.account ? dashboard.account.id : null,
-      dashboardAccountName: dashboard.account ? dashboard.account.name : null,
-      permissions: dashboard.permissions != null ? dashboard.permissions : null,
-    };
-    const key = JSON.stringify(attributes);
-    const group = groups.get(key);
-
-    if (group) {
-      group.value += 1;
-    } else {
-      groups.set(key, { attributes, value: 1 });
-    }
-  }
-
-  return Array.from(groups.values());
-}
-
-function toMetrics(groups, timestamp) {
-  return groups.map(({ attributes, value }) => ({
-    name: METRIC_NAME,
-    // A point-in-time count of dashboards, so a gauge rather than a count metric.
-    type: 'gauge',
-    value,
-    timestamp,
-    // Metric API rejects null attribute values, so drop them.
-    attributes: Object.fromEntries(
-      Object.entries(attributes).filter(([, v]) => v != null)
-    ),
-  }));
-}
-
-async function postMetrics(metrics) {
+async function postMetric(value, timestamp) {
   const { response, body } = await httpPostJson(
     METRIC_API_URL,
     { 'Api-Key': INSIGHTS_INSERT_KEY },
-    [{ metrics }]
+    // A point-in-time count of dashboards, so a gauge rather than a count metric.
+    [{ metrics: [{ name: METRIC_NAME, type: 'gauge', value, timestamp }] }]
   );
 
   assert.ok(
@@ -195,13 +143,9 @@ async function main() {
     'expected at least one dashboard entity from NerdGraph'
   );
 
-  const groups = countDashboards(dashboards);
-  const metrics = toMetrics(groups, Date.now());
-  console.log(`[DEBUG] built ${metrics.length} ${METRIC_NAME} data points, sample: ${JSON.stringify(metrics[0])}`);
+  await postMetric(dashboards.length, Date.now());
 
-  await postMetrics(metrics);
-
-  console.log(`Wrote ${metrics.length} ${METRIC_NAME} data points covering ${dashboards.length} dashboards.`);
+  console.log(`Wrote ${METRIC_NAME} = ${dashboards.length}.`);
 }
 
 // Unhandled rejections surface as a failed check in the Synthetics runtime.

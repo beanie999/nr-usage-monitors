@@ -6,10 +6,9 @@
 //   Discover every account visible to the API key, then for each account
 //   page through its NRQL alert conditions via NerdGraph, then count them
 //   and write the totals to NRDB as a custom metric named
-//   "usage.alerts" via the Metric API. Counts are grouped by
-//   alertAccountId, alertAccountName, conditionType, enabled,
-//   baselineDirection, usesAnomalies and usesPredictions, with one metric
-//   data point per combination.
+//   "usage.alerts" via the Metric API. Counts are grouped by enabled,
+//   usesAnomalies and usesPredictions, with one metric data point per
+//   combination.
 //
 //   Covers NRQL static, baseline, and outlier conditions. Flags whether a
 //   condition is configured to use predictive alerting (static conditions
@@ -61,7 +60,6 @@ const ALERT_CONDITIONS_QUERY = `
         alerts {
           asNrqlConditionsSearch(searchCriteria: {nameLike: "%"}, cursor: $cursor) {
             nrqlConditions {
-              __typename
               ... on AlertsAsNrqlStaticCondition {
                 enabled
                 terms {
@@ -191,23 +189,16 @@ async function fetchAlertConditionsForAccount(account) {
   return conditions;
 }
 
-function countConditions(account, conditions, groups) {
+function countConditions(conditions, groups) {
   for (const condition of conditions) {
-    const hasPrediction = (condition.terms || []).some(
+    const usesPredictions = (condition.terms || []).some(
       (term) => term.prediction && term.prediction.predictBy != null
     );
-    const baselineDirection = condition.baselineDirection != null ? condition.baselineDirection : null;
 
-    // "accountId" is a reserved attribute name in NRDB, so the condition's own
-    // account is stored under alertAccountId / alertAccountName.
     const attributes = {
-      alertAccountId: account.id,
-      alertAccountName: account.name,
-      baselineDirection,
-      conditionType: condition.__typename,
       enabled: condition.enabled,
-      usesAnomalies: baselineDirection != null,
-      usesPredictions: hasPrediction,
+      usesAnomalies: condition.baselineDirection != null,
+      usesPredictions,
     };
     const key = JSON.stringify(attributes);
     const group = groups.get(key);
@@ -261,7 +252,7 @@ async function main() {
     const conditions = await fetchAlertConditionsForAccount(account);
     console.log(`[DEBUG] account ${account.id} (${account.name}) has ${conditions.length} conditions`);
 
-    countConditions(account, conditions, groups);
+    countConditions(conditions, groups);
     totalConditions += conditions.length;
   }
 
